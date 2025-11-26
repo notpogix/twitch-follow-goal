@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Twitch Followers Overlay</title>
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+    }
+    #followers {
+      color: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 32px;
+      text-shadow: 0 0 4px rgba(0,0,0,0.7);
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <div id="followers">Followers: ...</div>
+  <script>
+    // Get params from URL
+    function getParam(name, def) {
+      let params = new URLSearchParams(window.location.search);
+      return params.get(name) || def;
+    }
+    const channel = getParam('channel', 'twitch');
+    const goal = parseInt(getParam('goal', '1000'), 10);
+
+    // Twitch API Client-ID ("official public" for overlays)
+    const CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+
+    async function getUserID(name) {
+      const resp = await fetch(`https://api.twitch.tv/helix/users?login=${name}`, {
+        headers: { "Client-ID": CLIENT_ID }
+      });
+      const data = await resp.json();
+      return data.data && data.data[0] ? data.data[0].id : null;
+    }
+
+    async function getFollowers(uid) {
+      const resp = await fetch(`https://api.twitch.tv/helix/users/follows?to_id=${uid}`, {
+        headers: { "Client-ID": CLIENT_ID }
+      });
+      const data = await resp.json();
+      return data.total || 0;
+    }
+
+    async function renderFollowers() {
+      const el = document.getElementById("followers");
+      el.textContent = "Loading...";
+      try {
+        const uid = await getUserID(channel);
+        if (!uid) { el.textContent = "User not found"; return; }
+        const count = await getFollowers(uid);
+        el.textContent = `Followers: ${count}/${goal}`;
+      } catch(e) {
+        el.textContent = "Error fetching followers";
+      }
+    }
+
+    renderFollowers();
+    setInterval(renderFollowers, 60000); // update every minute
+  </script>
+</body>
+</html>
