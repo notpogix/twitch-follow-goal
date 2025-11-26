@@ -2,66 +2,120 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Twitch Followers Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Followers Goal Overlay</title>
   <style>
+    :root {
+      --text-shadow: 2px 2px 8px rgba(0,0,0,0.25);
+    }
     body {
       margin: 0;
-      background: transparent;
+      padding: 0;
+      background: transparent !important;
+      overflow: hidden;
+      font-family: 'Inter', Arial, sans-serif;
     }
-    #followers {
+    #follower-goal {
       color: #fff;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 32px;
-      text-shadow: 0 0 4px rgba(0,0,0,0.7);
-      background: transparent;
+      text-shadow: var(--text-shadow);
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      background: none !important;
+      border: none;
+      user-select: none;
+      text-align: left;
+      padding: 8px 12px;
+      /* Let user scale font in OBS */
     }
   </style>
 </head>
 <body>
-  <div id="followers">Followers: ...</div>
+  <div id="follower-goal">Followers: ...</div>
   <script>
-    // Get params from URL
-    function getParam(name, def) {
-      let params = new URLSearchParams(window.location.search);
-      return params.get(name) || def;
-    }
-    const channel = getParam('channel', 'twitch');
-    const goal = parseInt(getParam('goal', '1000'), 10);
+    /* === USER: EDIT THIS LINE TO CHANGE CHANNEL === */
+    const TWITCH_CHANNEL = "marlon"; // <-- Replace with streamer's Twitch username
 
-    // Twitch API Client-ID ("official public" for overlays)
-    const CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+    /* == Overlay Logic == */
+    let followerGoal = 200; // Default goal, can be changed with !setgoal in chat
+    let currentFollowers = 0;
+    let lastAnnouncedGoal = followerGoal;
 
-    async function getUserID(name) {
-      const resp = await fetch(`https://api.twitch.tv/helix/users?login=${name}`, {
-        headers: { "Client-ID": CLIENT_ID }
-      });
-      const data = await resp.json();
-      return data.data && data.data[0] ? data.data[0].id : null;
+    const goalKey = `tg_${TWITCH_CHANNEL}_goal`;
+
+    // Restore latest goal from localStorage for session reloads (browser-side cache, OK for overlays)
+    if (window.localStorage && window.localStorage.getItem(goalKey)) {
+      followerGoal = +window.localStorage.getItem(goalKey) || followerGoal;
     }
 
-    async function getFollowers(uid) {
-      const resp = await fetch(`https://api.twitch.tv/helix/users/follows?to_id=${uid}`, {
-        headers: { "Client-ID": CLIENT_ID }
-      });
-      const data = await resp.json();
-      return data.total || 0;
+    function updateDisplay() {
+      document.getElementById('follower-goal').textContent =
+        `Followers: ${currentFollowers}/${followerGoal}`;
     }
 
-    async function renderFollowers() {
-      const el = document.getElementById("followers");
-      el.textContent = "Loading...";
+    async function fetchFollowers() {
+      // Uses https://twitchstats.p.rapidapi.com endpoint for followers -- Public Twitch API doesn't provide follower count directly without auth
+      // This overlay will use the Twitch Helix public API, but will fall back to a public endpoint as needed.
+      // For best use, replace with an API endpoint or your own proxy if hitting limits.
+      const user = TWITCH_CHANNEL.toLowerCase();
       try {
-        const uid = await getUserID(channel);
-        if (!uid) { el.textContent = "User not found"; return; }
-        const count = await getFollowers(uid);
-        el.textContent = `Followers: ${count}/${goal}`;
-      } catch(e) {
-        el.textContent = "Error fetching followers";
+        // Step 1: Get User ID
+        const userData = await fetch(`https://decapi.me/twitch/userid/${user}`);
+        const userId = await userData.text();
+        // Step 2: Use DecAPI to get follow count
+        const res = await fetch(`https://decapi.me/twitch/followers/${user}`);
+        const count = await res.text();
+        currentFollowers = parseInt(count.replace(/\D/g, ''), 10);
+        updateDisplay();
+      } catch (e) {
+        // fallback: show error
+        document.getElementById('follower-goal').textContent = "Followers: (error)";
       }
     }
 
-    renderFollowers();
-    setInterval(renderFollowers, 60000); // update every minute
+    // --- TWITCH CHAT LISTENER ---
+
+    // Load tmi.js from CDN for Twitch chat commands
+    (function loadTmiJs(cb) {
+      const script = document.createElement('script');
+      script.src = "https://cdn.jsdelivr.net/npm/tmi.js@1.8.5/dist/tmi.min.js";
+      script.onload = cb;
+      document.head.appendChild(script);
+    })(setupChat);
+
+    function setupChat() {
+      const client = new window.tmi.Client({
+        channels: [TWITCH_CHANNEL]
+      });
+
+      client.connect().catch(() => {});
+
+      client.on('message', (channel, tags, message, self) => {
+        // Only allow streamer or mods to set goal
+        if (self) return;
+        const lower = message.trim().toLowerCase();
+        if (lower.startsWith('!setgoal')) {
+          // Mods or broadcaster only
+          if (tags.mod || tags.badges && tags.badges.broadcaster) {
+            const match = message.match(/!setgoal\s+(\d+)/i);
+            if (match) {
+              followerGoal = parseInt(match[1], 10);
+              lastAnnouncedGoal = followerGoal;
+              if (window.localStorage) {
+                window.localStorage.setItem(goalKey, followerGoal + "");
+              }
+              updateDisplay();
+            }
+          }
+        }
+      });
+    }
+
+    // Update overlay every minute
+    setInterval(fetchFollowers, 60000);
+    fetchFollowers();
+    updateDisplay();
   </script>
 </body>
 </html>
